@@ -59,7 +59,7 @@ class SpikedNN:
         res = self.k2 * self.P_init @ delta @ psi
         return res
 
-    def run(self, x, u, step_size):
+    def fit(self, x, u, step_size):
         # Initialize vector
         self.history_x = []
         # cur_x = np.zeros(shape=(self._state_size, 1))
@@ -117,3 +117,20 @@ class SpikedNN:
             self.history_x.append(cur_x.copy())
 
         return True
+
+    def predict(self, x: np.array, u: np.array, step: float = 0.001) -> np.array:
+        prediction = x.copy()
+
+        Wa = self.history_Wa[-1]
+        Wb = self.history_Wb[-1]
+
+        for i in tqdm(range(len(x))):
+            sigma_out = self.sigma(prediction[i])
+            phi_out = self.phi(prediction[i])
+
+            prediction[i + 1] += step * (self.A_init @ prediction[i] + Wa @ sigma_out + Wb @ phi_out @ u[i])
+
+        return prediction
+
+
+

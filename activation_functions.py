@@ -1,10 +1,7 @@
 import numpy as np
 from typing import Tuple
 
-""" 
-TODO: 
-    + Add scaling params for the input and output of neuron
-"""
+
 class Izhikevich:
     def __init__(self,
                  shape: Tuple[int, int],
