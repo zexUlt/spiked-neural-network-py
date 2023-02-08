@@ -18,8 +18,9 @@ from SpikedNN import SpikedNN
 from typing import Tuple
 from sklearn.model_selection import GridSearchCV
 
-
 """# Initial system"""
+
+
 def aa(t):
     res = np.array([[np.cos(t), np.sin(t)],
                     [-np.sin(t), np.cos(t)]])
