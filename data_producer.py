@@ -5,12 +5,11 @@ import numpy as np
 
 
 class AbstractProducer(ABC):
-    def __init__(self):
-        raise NotImplementedError
+    @abstractmethod
+    def __call__(self, *args, **kwargs): ...
 
     @abstractmethod
-    def __call__(self, *args, **kwargs):
-        raise NotImplementedError
+    def get_state_shape(self): ...
 
 
 class IzhikevichProducer(AbstractProducer):
@@ -24,7 +23,7 @@ class IzhikevichProducer(AbstractProducer):
                  param_c: float = -65.,
                  param_d: float = 8.,
                  param_e: float = -65.):
-        super().__init__()
+        super(IzhikevichProducer, self).__init__()
         self.izh_border = izh_border
         self.param_a = param_a
         self.param_b = param_b
@@ -56,3 +55,5 @@ class IzhikevichProducer(AbstractProducer):
 
         return self.out_scale_factor * self.state
 
+    def get_state_shape(self):
+        return self.state.shape

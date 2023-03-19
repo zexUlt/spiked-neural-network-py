@@ -4,7 +4,6 @@ import numpy as np
 
 
 class AbstractProjector(ABC):
-    @abstractmethod
     def __init__(self, left_border: np.array, right_border: np.array):
         self.left_border: np.array = left_border
         self.right_border: np.array = right_border
@@ -15,8 +14,8 @@ class AbstractProjector(ABC):
 
 
 class NullProjector(AbstractProjector):
-    def __init__(self, left_border: np.array, right_border: np.array):
-        super().__init__(left_border, right_border)
+    def __init__(self):
+        super(NullProjector, self).__init__(None, None)
 
     def __call__(self, x: np.array) -> np.array:
         return x
@@ -24,6 +23,7 @@ class NullProjector(AbstractProjector):
 
 class SaturatedProjector(AbstractProjector):
     def __init__(self, left_border: np.array, right_border: np.array):
+        super(SaturatedProjector, self).__init__(left_border, right_border)
         self.left_border = left_border
         self.right_border = right_border
 

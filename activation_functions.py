@@ -26,6 +26,7 @@ class Izhikevich:
 
     def __call__(self, x: np.array, step: float = 0.01):
         x *= self.in_scale_factor
+        x = x.reshape((1, -1))
 
         vec_scale = np.ones(shape=self.state.shape)
 

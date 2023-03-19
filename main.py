@@ -13,10 +13,14 @@ TODO:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from activation_functions import Sigmoid, Izhikevich
-from SpikedNN import SpikedNN
 from typing import Tuple
-from sklearn.model_selection import GridSearchCV
+
+from SpikedNN import ProjectorlessSDNN, SpikedNN
+from activation_functions import Sigmoid, Izhikevich
+from data_generator import DataGenerator
+from data_producer import IzhikevichProducer
+from projectors import SaturatedProjector, NullProjector
+from gamma_func import MultiplicativeGamma
 
 """# Initial system"""
 
@@ -40,17 +44,23 @@ def xx(t):
     return np.array([[np.exp(np.sin(t)) * (1 - np.cos(t) + np.sin(t)), np.exp(np.sin(t))]]).T
 
 
-def initialize_base_vars():
+def initialize_base_vars(x_shape: int, u_shape: int):
     time_end = 6 * np.pi
     step = 1e-4
     time = np.arange(0, time_end, step)
+
+    producer = IzhikevichProducer((1, x_shape))
+    data_gen = DataGenerator(n=len(time), producer=producer)
+
     x_in = xx(time)
     u_in = uu(time)
+    # x_in = data_gen.generate(time)
+    # u_in = np.ones(shape=(time.shape[0], u_shape)) * 15.
 
     return time_end, step, x_in, u_in, time
 
 
-def draw_smth(time: np.array, x_in: np.array, x_pred: np.array, loss: np.array):
+def draw_smth(time: np.array, x_in: np.array, x_pred: np.array, loss: np.array, w_a: np.array, w_b: np.array):
     # noinspection PyTypeChecker
     fig, ax = plt.subplots(ncols=2, figsize=(15, 3), sharex=True, sharey=False)
     ax[0].plot(time, x_in[:, 0, :], label=f"x0 input")
@@ -71,6 +81,13 @@ def draw_smth(time: np.array, x_in: np.array, x_pred: np.array, loss: np.array):
     ax[0].plot(time[:-1], loss[:, 0, :], label=f"loss1")
     ax[0].legend()
     ax[1].plot(time[:-1], loss[:, 1, :], label=f"loss2")
+    ax[1].legend()
+    plt.show()
+
+    fig, ax = plt.subplots(ncols=2, figsize=(15, 2), sharex=True, sharey=False)
+    ax[0].plot(time[:-1], np.linalg.norm(w_a, axis=(1, 2))[:-1], label=f"w_1")
+    ax[0].legend()
+    ax[1].plot(time[:-1], np.linalg.norm(w_b, axis=(1, 2))[:-1], label=f"w_2")
     ax[1].legend()
     plt.show()
 
@@ -162,73 +179,75 @@ def plot_initial_system():
     plt.show()
 
 
-def run_test_1(params: Tuple):
+def init_dnn(params: dict):
     np.random.seed(2)
 
     # b1 = np.random.random(b1_shape) * 10
+    b1 = np.zeros(b1_shape)
     # c1 = np.random.random(c1_shape) * 10
+    c1 = np.ones(c1_shape) * -1
     # d1 = np.random.random(d1_shape) * 10
-    # e1 = np.zeros(e1_shape)
+    d1 = np.ones(d1_shape) * 0.5
+    e1 = np.zeros(e1_shape)
     # b2 = np.random.random(b2_shape) * 10
+    b2 = np.zeros(b2_shape)
     # c2 = np.random.random(c2_shape) * 10
+    c2 = np.ones(c2_shape) * -1
     # d2 = np.random.random(d2_shape) * 10
-    # e2 = np.zeros(e2_shape)
+    d2 = np.ones(d2_shape) * 0.5
+    e2 = np.zeros(e2_shape)
 
-    # sigma = Sigmoid(nn1, 1, b1, c1, d1, e1)
-    # phi = Sigmoid(nn2, u_size, b2, c2, d2, e2)
-    sigma = Izhikevich((nn1, 1), in_scale=params[0], out_scale=params[1])
-    phi = Izhikevich((nn2, u_size), in_scale=params[0], out_scale=params[1])
+    sigma = Sigmoid(nn1, 1, b1, c1, d1, e1)
+    phi = Sigmoid(nn2, u_size, b2, c2, d2, e2)
 
-    dnn_params = {
-        'state_size': state_size,
-        'u_size': u_size,
-        'k1': 10,
-        'k2': 10,
-        'nn1': nn1,
-        'nn2': nn2,
-        'wa_init': np.random.rand(state_size, nn1) * 1e-1,
-        'wb_init': np.random.rand(u_size, nn2) * 1e-1,
-        'a_init': np.identity(2) * -0.99,
-        'p_init': np.array([[10.0, 0.0], [0.0, 40.0]]) * 10,
-        # 'stop_time': 1*2*np.pi,
-        'stop_time': time_end,
-        'sigma': sigma,
-        'phi': phi,
-        'use_x_hat': False
-    }
+    params['sigma_1'] = sigma
+    params['sigma_2'] = phi
 
-    s_dnn = SpikedNN(**dnn_params)
-    # stop = int(0.35*len(x_input))
-    # result = s_dnn.run(x=x_input[:stop], u=u_input[:stop], step_size=step)
-    result = s_dnn.run(x=x_input, u=u_input, step_size=step)
+    gamma_1 = MultiplicativeGamma(param=params['c_1'], is_inner=True, weight_matrix=params['p_internal'])
+    gamma_2 = MultiplicativeGamma(param=params['c_2'], is_inner=False, weight_matrix=params['p_external'])
 
-    print()
-    print(result)
+    params['gamma_1'] = gamma_1
+    params['gamma_2'] = gamma_2
 
-    loss_norm = np.sum(np.linalg.norm(s_dnn.history_loss, axis=1))
-    loss_delta = np.sum(list(map(lambda el: np.transpose(el) @ el, s_dnn.history_loss)))
+    s_dnn = ProjectorlessSDNN(**params)
+
+    return s_dnn
+
+
+def process(model):
+    model.fit(x=x_input, u=u_input, step=step)
+
+    loss_norm = np.sum(np.linalg.norm(model.history_loss, axis=1))
+    loss_delta = np.sum(list(map(lambda el: np.transpose(el) @ el, model.history_loss)))
 
     print(f"Loss Norm:\t{loss_norm}")
     print(f"Loss Delta:\t{loss_delta}")
 
-    x = np.array(s_dnn.history_x)
-    loss = np.array(s_dnn.history_loss)
+    return model
 
-    draw_smth(time=time, x_in=x_input, x_pred=x, loss=loss)
+
+def run_test_1(model):
+    model = process(model)
+
+    x = np.array(model.history_x)
+    loss = np.array(model.history_loss)
+
+    draw_smth(time=time, x_in=x_input, x_pred=x, loss=loss, w_a=np.asarray(model.history_Wa),
+              w_b=np.asarray(model.history_Wb))
 
     # noinspection PyTypeChecker
-    fig, ax = plt.subplots(nrows=max(s_dnn.nn1, s_dnn.nn2), ncols=2, figsize=(15, 5), sharex=True, sharey=False)
-    s_dnn_sigma = np.array(s_dnn.history_sigma)
-    s_dnn_phi_u = np.array(s_dnn.history_phi_U)
+    fig, ax = plt.subplots(nrows=max(model.nn1, model.nn2), ncols=2, figsize=(15, 5), sharex=True, sharey=False)
+    s_dnn_sigma = np.array(model.history_sigma)
+    s_dnn_phi_u = np.array(model.history_phi_U)
 
     # sigma
-    for i in range(s_dnn.nn1):
+    for i in range(model.nn1):
         ax[i, 0].plot(time[:-1], s_dnn_sigma[:, i])
         ax[i, 0].set_title(f'$\\sigma_{{{i}}} (x) $')
         # ax[i, 0].set_xlim(0,xlim)
 
     # phi
-    for i in range(s_dnn.nn2):
+    for i in range(model.nn2):
         ax[i, 1].plot(time[:-1], s_dnn_phi_u[:, i])
         ax[i, 1].set_title(f'$\\varphi_{{{i}}} (x) u$')
         # ax[i, 1].set_xlim(0,xlim)
@@ -236,86 +255,56 @@ def run_test_1(params: Tuple):
     plt.show()
 
 
-def run_test_2(params: Tuple):
-    sigma = Izhikevich((nn1, 1), in_scale=params[0], out_scale=params[1])
-    phi = Izhikevich((nn2, u_size), in_scale=params[0], out_scale=params[1])
-    sigmoidal_dnn_params = {
-        'state_size': state_size,
-        'u_size': u_size,
-        'k1': 10,
-        'k2': 10,
-        'nn1': nn1,
-        'nn2': nn2,
-        'wa_init': np.random.rand(state_size, nn1) * 1e-1,
-        'wb_init': np.random.rand(u_size, nn2) * 1e-1,
-        'a_init': np.identity(2) * -0.99,
-        'p_init': np.array([[10.0, 0.0], [0.0, 40.0]]) * 10,
-        # 'stop_time': 1*2*np.pi,
-        'stop_time': time_end * 0.9,
-        'sigma': sigma,
-        'phi': phi,
-        'use_x_hat': False
-    }
-    s_dnn = SpikedNN(**sigmoidal_dnn_params)
-    # stop = int(0.35*len(x_input))
-    # result = s_dnn.run(x=x_input[:stop], u=u_input[:stop], step_size=step)
-    result = s_dnn.run(x=x_input, u=u_input, step_size=step)
-    print()
-    print(result)
-    loss_norm = np.sum(np.linalg.norm(s_dnn.history_loss, axis=1))
-    loss_delta = np.sum(list(map(lambda el: np.transpose(el) @ el, s_dnn.history_loss)))
-    print(f"Loss Norm:\t{loss_norm}")
-    print(f"Loss Delta:\t{loss_delta}")
-    x = np.array(s_dnn.history_x)
-    loss = np.array(s_dnn.history_loss)
+def run_test_2(model):
+    model = process(model)
+
+    x = np.array(model.history_x)
+    loss = np.array(model.history_loss)
     draw_smth(time, x_input, x, loss)
 
 
-def tune(in_scale_params: Tuple[float, float, float], out_scale_params: Tuple[float, float, float]) -> Tuple:
-    in_scale_start, in_scale_end, in_scale_step = in_scale_params
-    out_scale_start, out_scale_end, out_scale_step = out_scale_params
+def tune(params: dict) -> Tuple:
+    c_1_start, c_1_end, c_1_step = params['c_1']
+    c_2_start, c_2_end, c_2_step = params['c_2']
+    el_coef_start, el_coef_end, el_coef_step = params['ellipse_coef']
     best_score = float('inf')
     best_params = ...
 
-    tune_params = {}
+    # tune_params = {}
 
-    for in_scale in np.arange(in_scale_start, in_scale_start + in_scale_step, in_scale_step, dtype=float):
-        for out_scale in np.arange(out_scale_start, out_scale_start + 10 * out_scale_step, out_scale_step, dtype=float):
-            print(f'Tuned params: in_scale={in_scale}, out_scale={out_scale}')
+    for c_1 in np.arange(c_1_start, c_1_end, c_1_step, dtype=float):
+        for c_2 in np.arange(c_2_start, c_2_end, c_2_step, dtype=float):
+            for ellipse_coef in np.arange(el_coef_start, el_coef_end, el_coef_step, dtype=float):
+                print(f'Tuned params: с_1={c_1}, с_2={c_2}, ellipse_scale={ellipse_coef}')
+                dnn_params = {
+                    'state_size': state_size,
+                    'u_size': u_size,
+                    'k1': 10,
+                    'k2': 10,
+                    'nn1': nn1,
+                    'nn2': nn2,
+                    'wa_init': np.random.rand(state_size, nn1) * 1e-1,
+                    'wb_init': np.random.rand(u_size, nn2) * 1e-1,
+                    'a_init': np.identity(2) * -0.99,
+                    'p_init': np.array([[10.0, 0.0], [0.0, 40.0]]) * 10,
+                    'p_internal': np.diag(np.ones(state_size * nn1, dtype=float) * ellipse_coef),
+                    'p_external': np.diag(np.ones(u_size * nn2, dtype=float) * ellipse_coef / 2),
+                    'c_1': c_1,
+                    'c_2': c_2,
+                    'stop_time': time_end,
+                    'use_x_hat': False
+                }
+                s_dnn = init_dnn(dnn_params).fit(x=x_input, u=u_input, step=step)
 
-            sigma = Izhikevich((nn1, 1), in_scale=in_scale, out_scale=out_scale)
-            phi = Izhikevich((nn2, u_size), in_scale=in_scale, out_scale=out_scale)
-            sigmoidal_dnn_params = {
-                'state_size': state_size,
-                'u_size': u_size,
-                'k1': 10,
-                'k2': 10,
-                'nn1': nn1,
-                'nn2': nn2,
-                'wa_init': np.random.rand(state_size, nn1) * 1e-1,
-                'wb_init': np.random.rand(u_size, nn2) * 1e-1,
-                'a_init': np.identity(2) * -0.99,
-                'p_init': np.array([[10.0, 0.0], [0.0, 40.0]]) * 10,
-                # 'stop_time': 1*2*np.pi,
-                'stop_time': time_end * 0.9,
-                'sigma': sigma,
-                'phi': phi,
-                'use_x_hat': False
-            }
-            s_dnn = SpikedNN(**sigmoidal_dnn_params)
-            result = s_dnn.run(x=x_input, u=u_input, step_size=step)
+                loss_norm = np.sum(np.linalg.norm(s_dnn.history_loss, axis=1))
+                loss_delta = np.sum(list(map(lambda el: np.transpose(el) @ el, s_dnn.history_loss)))
 
-            # print(f'\n{result}')
+                print(f"Loss Norm:\t{loss_norm}")
+                print(f"Loss Delta:\t{loss_delta}\n")
 
-            loss_norm = np.sum(np.linalg.norm(s_dnn.history_loss, axis=1))
-            loss_delta = np.sum(list(map(lambda el: np.transpose(el) @ el, s_dnn.history_loss)))
-
-            print(f"Loss Norm:\t{loss_norm}")
-            print(f"Loss Delta:\t{loss_delta}\n")
-
-            if loss_norm < best_score:
-                best_params = (in_scale, out_scale)
-                best_score = loss_norm
+                if loss_norm < best_score:
+                    best_params = (c_1, c_2, ellipse_coef)
+                    best_score = loss_norm
 
     print(f'Best score: {best_score}', f'Best params: {best_params}', end='\n')
     return best_params
@@ -333,18 +322,34 @@ if __name__ == '__main__':
     state_size = 2
     u_size = 2
 
-    # b1_shape, c1_shape, d1_shape, e1_shape, \
-    # b2_shape, c2_shape, d2_shape, e2_shape = get_variables_shapes(dim1=nn1, dim2=nn2,
-    #                                                               state_size=state_size,
-    #                                                               u_size=u_size)
+    b1_shape, c1_shape, d1_shape, e1_shape, \
+        b2_shape, c2_shape, d2_shape, e2_shape = get_variables_shapes(dim1=nn1, dim2=nn2,
+                                                                      state_size=state_size,
+                                                                      u_size=u_size)
 
-    time_end, step, x_input, u_input, time = initialize_base_vars()
+    time_end, step, x_input, u_input, time = initialize_base_vars(x_shape=state_size, u_shape=u_size)
 
-    best_params = (1., 0.26)
-    # best_params = tune((1., 100., 5.), (0.01, 1., 0.05))
+    # best_params = tune({'c_1': (0.1, 2., 0.1), 'c_2': (0.1, 2., 0.1), 'ellipse_coef': (0.1, 1, 0.1)})
+    dnn_params = {
+        'state_size': state_size,
+        'u_size': u_size,
+        'k1': 10,
+        'k2': 10,
+        'nn1': nn1,
+        'nn2': nn2,
+        'wa_init': np.random.rand(state_size, nn1) * 1e-1,
+        'wb_init': np.random.rand(u_size, nn2) * 1e-1,
+        'a_init': np.identity(2) * -0.99,
+        'p_init': np.array([[10.0, 0.0], [0.0, 40.0]]) * 10,
+        'p_internal': np.eye(state_size * nn1, dtype=float),
+        'p_external': np.eye(u_size * nn2, dtype=float) * 0.25,
+        'c_1': 0.001,
+        'c_2': 0.001,
+        'stop_time': time_end,
+        'use_x_hat': False
+    }
 
-    # plot_initial_system()
+    model = init_dnn(dnn_params)
 
-    run_test_1(best_params)
-
-    run_test_2(best_params)
+    run_test_1(model)
+    # run_test_2(model)

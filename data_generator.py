@@ -1,6 +1,8 @@
 from typing import Union, Tuple
-from data_producer import AbstractProducer
 import numpy as np
+from tqdm import tqdm
+
+from data_producer import AbstractProducer
 
 
 class DataGenerator:
@@ -11,9 +13,8 @@ class DataGenerator:
         self.size = n
         self.producer = producer
 
-    def generate(self): ...
-
-    def get(self) -> np.array:
-        out_array = np.array(self.size)
-
-        return out_array
+    def generate(self, x: Union[float, np.array]):
+        result = np.zeros(shape=(self.size, self.producer.get_state_shape()[1]))
+        for i, t in tqdm(enumerate(x)):
+            result[i] = self.producer(t)
+        return result
