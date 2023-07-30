@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Tuple
+from compiled.activation_functions import generate_sigmoid_call
 
 
 class Izhikevich:
@@ -49,36 +50,29 @@ class Sigmoid:
                  u_size: int,
                  param_b: np.array,
                  param_c: np.array,
-                 param_d: np.array,
-                 param_e: np.array):
+                 param_d: np.array):
         self.out = out
         self.u_size = u_size
-        self.param_b = param_b
-        self.param_c = param_c
-        self.param_d = param_d
-        self.param_e = param_e
+        self.param_b = np.asarray(param_b, dtype=float)
+        self.param_c = np.asarray(param_c, dtype=float)
+        self.param_d = np.asarray(param_d, dtype=float)
 
     def __call__(self, x: np.array):
-        s = np.zeros((self.out, self.u_size))
+        s = np.zeros((self.out, self.u_size), dtype=np.float32)
         nin = x.shape[0]
 
         if self.u_size > 1:
             for j in range(self.u_size):
                 for neurons_out in range(self.out):
-                    z = 0
+                    z = np.zeros((1,))
                     for neurons_in in range(nin):
-                        z += x[neurons_in] * self.param_c[neurons_in, neurons_out, j] + \
-                             self.param_b[neurons_out, j]
-                    s[neurons_out, j] = (1 / (1 + np.exp(z))) + \
-                                        self.param_d[neurons_out, j] - \
-                                        self.param_e[neurons_out, j]
+                        z = z + x[neurons_in] * self.param_c[neurons_in, neurons_out, j] + self.param_b[neurons_out, j]
+                    s[neurons_out, j] = (1 / (1 + np.exp(z))) + self.param_d[neurons_out, j]
+
         else:
             for neurons_out in range(self.out):
-                z = 0
+                z = np.zeros((1,))
                 for neurons_in in range(nin):
-                    z += x[neurons_in] * self.param_c[neurons_in, neurons_out] + \
-                         self.param_b[neurons_out]
-                s[neurons_out] = (1 / (1 + np.exp(z))) + \
-                                 self.param_d[neurons_out] - \
-                                 self.param_e[neurons_out]
+                    z = z + x[neurons_in] * self.param_c[neurons_in, neurons_out] + self.param_b[neurons_out]
+                s[neurons_out] = (1 / (1 + np.exp(z))) + self.param_d[neurons_out]
         return s

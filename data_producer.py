@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Callable
 
 import numpy as np
 
@@ -57,3 +57,15 @@ class IzhikevichProducer(AbstractProducer):
 
     def get_state_shape(self):
         return self.state.shape
+
+
+class CallableProducer:
+    def __init__(self, data_shape: int | Tuple[int, int], f: Callable):
+        super(CallableProducer, self).__init__(data_shape, f)
+        self.f = np.vectorize(f)
+        self.shape = data_shape
+
+    def __call__(self, x):
+        return self.f(x)
+
+
